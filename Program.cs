@@ -1,41 +1,69 @@
+using UserApi.Models;
+using UserApi.Services;
+
 var builder = WebApplication.CreateBuilder(args);
-
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
-
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+var userService = new UserService();
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
+// Middleware de logging
+app.Use(async (context, next) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    Console.WriteLine($"Request: {context.Request.Method} {context.Request.Path}");
+    await next.Invoke();
+});
 
-app.MapGet("/weatherforecast", () =>
+// GET all users
+app.MapGet("/users", () => Results.Ok(userService.GetAll()));
+
+// GET user by id
+app.MapGet("/users/{id:int}", (int id) =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    var user = userService.GetById(id);
+    return user is not null ? Results.Ok(user) : Results.NotFound(new { Message = "User not found" });
+});
+
+// POST create user con validación
+app.MapPost("/users", (User user) =>
+{
+    var validationErrors = ValidateUser(user);
+    if (validationErrors.Any())
+        return Results.BadRequest(new { Errors = validationErrors });
+
+    var createdUser = userService.Create(user);
+    return Results.Created($"/users/{createdUser.Id}", createdUser);
+});
+
+// PUT update user con validación
+app.MapPut("/users/{id:int}", (int id, User user) =>
+{
+    var validationErrors = ValidateUser(user);
+    if (validationErrors.Any())
+        return Results.BadRequest(new { Errors = validationErrors });
+
+    return userService.Update(id, user) ? Results.Ok(user) : Results.NotFound(new { Message = "User not found" });
+});
+
+// DELETE user
+app.MapDelete("/users/{id:int}", (int id) =>
+    userService.Delete(id) ? Results.Ok(new { Message = "User deleted" }) : Results.NotFound(new { Message = "User not found" })
+);
 
 app.Run();
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
+// Función de validación centralizada
+List<string> ValidateUser(User user)
 {
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    var errors = new List<string>();
+
+    if (string.IsNullOrWhiteSpace(user.Name))
+        errors.Add("Name is required.");
+
+    if (string.IsNullOrWhiteSpace(user.Email) || !user.Email.Contains("@"))
+        errors.Add("Valid email is required.");
+
+    if (user.Age < 0)
+        errors.Add("Age must be a positive number.");
+
+    return errors;
 }
